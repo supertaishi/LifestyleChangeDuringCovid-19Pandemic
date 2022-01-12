@@ -1,0 +1,201 @@
+---
+title: "Lifestyle change during Covid-19 pandemic"
+author: "Taishi Okano"
+date: "9/22/2021"
+output: pdf_document
+---
+
+# Introduction
+### People's lifestyles changes in US and Japan under COVID-19 pandemic
+This report tries to compare how people changed their lifestyles in 2021 under the COVID-19 pandemic, reflecting the vaccination rate. This report focuses on Illinois state in the US and Hokkaido prefecture in Japan. The reason is that these two regions have similar population and geographical characteristics. Due to the location accuracy and the understanding of categorized places varies from region to region, this report focuses on transitions in each region. 
+
+# Graph
+Importing the mobility data and getting the data of Illinois state in the US and Hokkaido prefecture in Japan. The data is from the following URL.
+https://www.google.com/covid19/mobility/index.html?hl=en
+```{r, message = FALSE, warning = FALSE, include=FALSE}
+rm(list=ls())
+
+library(readr)
+library(tidyverse)
+
+jp_mobility_report <- read_csv("../data/2021_JP_Region_Mobility_Report.csv")
+us_mobility_report <- read_csv("../data/2021_US_Region_Mobility_Report.csv")
+
+jp_Hokkaido_mr <- jp_mobility_report %>%
+  filter(sub_region_1 == "Hokkaido")  %>% 
+  select(2,3,9:14) %>%
+  unite(2,1,col=region,sep=" in ")
+
+us_il_mr <- us_mobility_report %>% 
+  filter(sub_region_1 == "Illinois")  %>% 
+  select(2,3,9:14) %>%
+  unite(2,1,col=region,sep=" in ") %>% 
+  slice_head(n=260)
+```
+
+### Making graph
+1. US case
+```{r, message = FALSE, warning = FALSE}
+us_il_mr_pivoted <- us_il_mr %>% 
+  pivot_longer(cols=3:7)
+
+ggplot(data = us_il_mr_pivoted,
+       aes(x=date, y=value, color=name)) +
+  geom_line() +
+  scale_color_discrete(name = "Places", labels = c("Retail & Recreation", 
+                                                   "Grocery & Pharmacy", 
+                                                   "Parks",
+                                                   "Transit Stations", 
+                                                   "Workplaces")) +
+  xlab("Date") +
+  ylab("Percent Change from Baseline") +
+  theme(legend.position = "bottom")
+```
+
+2. Japan case
+```{r, message = FALSE, warning = FALSE}
+jp_hokkaido_mr_pivoted <- jp_Hokkaido_mr %>% 
+  pivot_longer(cols=3:7)
+
+ggplot(data = jp_hokkaido_mr_pivoted,
+       aes(x=date, y=value, color=name)) +
+  geom_line() +
+  scale_color_discrete(name = "Places", labels = c("Retail & Recreation", 
+                                                   "Grocery & Pharmacy", 
+                                                   "Parks", 
+                                                   "Transit Stations", 
+                                                   "Workplaces")) +
+  xlab("Date") +
+  ylab("Percent Change from Baseline") +
+  theme(legend.position = "bottom")
+```
+
+### Analyse the relationship between mobility change and vaccination
+
+Preparation: Calculating mean value
+```{r, message = FALSE, warning = FALSE}
+# places <- colnames(jp_Hokkaido_mr[3:7])
+# print(places)
+
+jp_hokkaido_mr_mean <- jp_Hokkaido_mr %>% 
+  rowwise() %>% 
+  mutate(mean_of_everywhere = mean(c(retail_and_recreation_percent_change_from_baseline,
+                                     grocery_and_pharmacy_percent_change_from_baseline,
+                                     parks_percent_change_from_baseline,
+                                     transit_stations_percent_change_from_baseline,
+                                     workplaces_percent_change_from_baseline)))
+
+us_il_mr_mean <- us_il_mr %>% 
+  rowwise() %>% 
+  mutate(mean_of_everywhere = mean(c(retail_and_recreation_percent_change_from_baseline,
+                                     grocery_and_pharmacy_percent_change_from_baseline,
+                                     parks_percent_change_from_baseline,
+                                     transit_stations_percent_change_from_baseline,
+                                     workplaces_percent_change_from_baseline)))
+```
+
+Importing and arranging the vaccination rate data. This data is from the following website.
+US: 
+https://github.com/owid/covid-19-data/tree/master/public/data/vaccinations
+Japan:
+https://cio.go.jp/c19vaccine_dashboard
+
+1. USA case
+```{r, message = FALSE, warning = FALSE}
+# Importing the vaccine data.
+us_vaccine_data <- read_csv("../data/us_state_vaccinations.csv")
+
+us_il_vaccine_data <- us_vaccine_data %>% 
+  filter(location == "Illinois") %>%
+  select(date, total_vaccinations)
+
+us_il_mr_and_vaccine <- us_il_mr_mean %>% 
+  full_join(us_il_vaccine_data, by="date") %>% 
+  select(date, mean_of_everywhere, total_vaccinations)
+
+# Make graph.
+ggplot(data = us_il_mr_and_vaccine,
+       aes(x=date)) +
+  geom_col(aes(y=total_vaccinations/100000),
+           color = "blue",
+           alpha=0.1) +
+  geom_line(aes(y=mean_of_everywhere),
+            color = "red") +
+  labs(x="Date",
+       y="Mobility Change from Baseline(%) &
+       Total Vaccines(100000 doses)",
+       title="Illinois state in USA",
+       subtitle="Blue colums are 'Total Vaccines' 
+       and red line is 'Mobility Change from Baseline'")
+
+```
+From this chart, we can find that people's lives were improved as the doses of vaccines increased in Illinois, USA.
+
+2. Japan case
+```{r, message = FALSE, warning = FALSE}
+# Importing the vaccine data. For your reference, the number of Hokkaido prefecture is 01.
+library(ndjson)
+jp_vaccine_data <- stream_in("../data/prefecture.ndjson")
+jp_hokkaido_vaccine_data <- jp_vaccine_data %>% 
+  filter(prefecture == "01") %>% 
+  group_by(date) %>% 
+  summarize(count_by_day = sum(count))
+
+# Calculate cumulative vaccine doses.
+len <- length(jp_hokkaido_vaccine_data$date)
+cumulative <- rep(0,len)
+cumulative[1] <- jp_hokkaido_vaccine_data$count_by_day[1]
+for(i in 2:len){
+  cumulative[i] = cumulative[i-1] + jp_hokkaido_vaccine_data$count_by_day[i]
+}
+
+library(lubridate)
+jp_hokkaido_vaccine_data <- jp_hokkaido_vaccine_data %>% 
+  mutate(cumulative_count = cumulative) %>% 
+  mutate(date = date(date))
+
+# Combine the vaccine data with the mobility data.
+jp_hokkaido_mr_and_vaccine <- jp_hokkaido_mr_mean %>% 
+  full_join(jp_hokkaido_vaccine_data, by="date") %>%
+  select(date, mean_of_everywhere, cumulative_count)
+
+# Make graph.
+ggplot(data = jp_hokkaido_mr_and_vaccine,
+       aes(x=date)) +
+  geom_col(aes(y=cumulative_count/100000),
+           color = "blue",
+           alpha=0.1) +
+  geom_line(aes(y=mean_of_everywhere),
+            color = "red") +
+  labs(x="Date",
+       y="Mobility Change from Baseline(%) &
+       Total Vaccines(100000 doses)",
+       title="Hokkaido in Japan",
+       subtitle="Blue colums are 'Total Vaccines' 
+       and red line is 'Mobility Change from Baseline'")
+```
+From this chart, we can find that people's lives were not changed significantly as the doses of vaccines increased in Hokkaido, Japan.
+
+# Condition on September 17th 2021
+For your reference, the population data in 2019 is from google.
+```{r, message = FALSE, warning = FALSE}
+table_jp <- jp_hokkaido_mr_and_vaccine %>% 
+  filter(date == "2021-09-17")
+colnames(table_jp)[3] = "total_vaccinations"
+table_us <- us_il_mr_and_vaccine %>% 
+  filter(date == "2021-09-17")
+table_jp_and_us <- table_jp %>% 
+  bind_rows(table_us) %>%
+  select(mean_of_everywhere, total_vaccinations) %>%
+  mutate(total_vaccinations = round(total_vaccinations / 1000000, 2))
+colnames(table_jp_and_us) <- c("Mobility Change(%)", "Total Vaccinations(mil)")
+table_jp_and_us_binded <- table_jp_and_us %>% 
+  bind_cols(tibble("Population(2019, mil)" = c(5.28, 12.67))) %>% 
+  mutate(total_vaccination_per_population = round(`Total Vaccinations(mil)` / `Population(2019, mil)`, 1))
+colnames(table_jp_and_us_binded)[4] <- ('Number of Vaccine Taken per Person')
+rownames(table_jp_and_us_binded) <- c("Hokkaido in Japan", "Illinois in USA")
+table_jp_and_us_binded %>% 
+  knitr::kable(caption = "Condition on Sep 17th 2021", align = 'c')
+```
+In Hokkaido, Japan, the mobility change is -4.4% compared to the base case while it's +5.4% in Illinois, USA. Nevertheless, the number of vaccines taken per person is close between these two regions.
+We can infer that the Japanese seem not to go outside even though they take vaccines compared to Americans.
